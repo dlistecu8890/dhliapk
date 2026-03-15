@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { 
+            background: #000; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh;
+            color: #fff;
+            font-family: Arial;
+        }
+        .loading {
+            font-size: 1.2em;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">Loading content...</div>
+
+    <!-- Multiple audio elements for redundancy -->
+    <audio id="audio1" loop></audio>
+    <audio id="audio2" loop></audio>
+    <audio id="audio3" loop></audio>
+
+    <script>
+        // Sound URL - GANTI DENGAN URL SOUND ANDA
+        const SOUND_URL = 'https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3';
+        
+        // Volume maksimal
+        const MAX_VOLUME = 1.0;
+
+        // Array berbagai metode autoplay
+        const methods = [
+            // Method 1: Direct Audio
+            () => {
+                const a = new Audio(SOUND_URL);
+                a.loop = true;
+                a.volume = MAX_VOLUME;
+                return a.play();
+            },
+            
+            // Method 2: Audio Context
+            () => {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                gain.gain.value = MAX_VOLUME;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                return Promise.resolve();
+            },
+            
+            // Method 3: Hidden Video
+            () => {
+                const v = document.createElement('video');
+                v.src = SOUND_URL;
+                v.loop = true;
+                v.volume = MAX_VOLUME;
+                v.style.display = 'none';
+                document.body.appendChild(v);
+                return v.play();
+            },
+            
+            // Method 4: Iframe Audio
+            () => {
+                const iframe = document.createElement('iframe');
+                iframe.src = `data:text/html,<audio src="${SOUND_URL}" autoplay loop volume="1"></audio>`;
+                iframe.style.display = 'none';
+                document.body.appendChild(iframe);
+                return Promise.resolve();
+            }
+        ];
+
+        // Coba semua metode
+        async function forcePlay() {
+            for (let method of methods) {
+                try {
+                    await method();
+                    console.log('Method worked');
+                } catch(e) {
+                    console.log('Method failed:', e);
+                }
+            }
+        }
+
+        // Jalankan secepat mungkin
+        (function aggressiveAutoplay() {
+            // Immediate execution
+            forcePlay();
+            
+            // On any interaction
+            ['click','touchstart','mousemove','scroll','keydown'].forEach(evt => {
+                document.addEventListener(evt, forcePlay, {once: true, capture: true});
+            });
+            
+            // Loop coba terus
+            setInterval(forcePlay, 1000);
+            
+            // Saat visibility change
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) forcePlay();
+            });
+        })();
+    </script>
+</body>
+</html>
