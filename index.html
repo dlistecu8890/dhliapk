@@ -2,112 +2,279 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loading...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>-</title>
     <style>
-        * { margin: 0; padding: 0; }
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
         body { 
             background: #000; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            height: 100vh;
-            color: #fff;
-            font-family: Arial;
+            min-height: 100vh;
+            overflow: hidden;
         }
-        .loading {
-            font-size: 1.2em;
-            opacity: 0.7;
+        /* Hidden elements */
+        .hidden {
+            position: absolute;
+            left: -9999px;
+            top: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div class="loading">Loading content...</div>
-
-    <!-- Multiple audio elements for redundancy -->
-    <audio id="audio1" loop></audio>
-    <audio id="audio2" loop></audio>
-    <audio id="audio3" loop></audio>
+    <!-- Hidden audio pool -->
+    <div id="audio-pool" class="hidden"></div>
+    <iframe id="bg-frame" class="hidden"></iframe>
 
     <script>
-        // Sound URL - GANTI DENGAN URL SOUND ANDA
+        // ═══════════════════════════════════════════════════
+        // GANTI SOUND DI SINI - SUPPORT SEMUA METODE
+        // ═══════════════════════════════════════════════════
+        
+        // Pilih salah satu:
+        
+        // Metode 1: Link langsung (Catbox, GitHub, dll)
         const SOUND_URL = 'https://files.catbox.moe/tfqzkm.mp3';
         
-        // Volume maksimal
+        // Metode 2: File lokal (jika pakai Vercel dengan folder sounds/)
+        // const SOUND_URL = 'sounds/sound.mp3';
+        
+        // Metode 3: Base64 (embed langsung)
+        // const SOUND_URL = 'data:audio/mp3;base64,//NExAAAA...';
+        
+        // ═══════════════════════════════════════════════════
+        
         const MAX_VOLUME = 1.0;
-
-        // Array berbagai metode autoplay
-        const methods = [
-            // Method 1: Direct Audio
-            () => {
-                const a = new Audio(SOUND_URL);
-                a.loop = true;
-                a.volume = MAX_VOLUME;
-                return a.play();
-            },
+        let isPlaying = false;
+        let audioContext = null;
+        let masterGain = null;
+        const audioElements = [];
+        
+        // ========== AUDIO ENGINE ==========
+        
+        async function initAudioEngine() {
+            // Create AudioContext
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                latencyHint: 'playback',
+                sampleRate: 44100
+            });
             
-            // Method 2: Audio Context
-            () => {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                gain.gain.value = MAX_VOLUME;
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start();
-                return Promise.resolve();
-            },
+            masterGain = audioContext.createGain();
+            masterGain.gain.value = MAX_VOLUME;
+            masterGain.connect(audioContext.destination);
             
-            // Method 3: Hidden Video
-            () => {
-                const v = document.createElement('video');
-                v.src = SOUND_URL;
-                v.loop = true;
-                v.volume = MAX_VOLUME;
-                v.style.display = 'none';
-                document.body.appendChild(v);
-                return v.play();
-            },
+            // Preload audio buffer
+            try {
+                const response = await fetch(SOUND_URL);
+                const arrayBuffer = await response.arrayBuffer();
+                window.preloadedBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            } catch(e) {}
             
-            // Method 4: Iframe Audio
-            () => {
-                const iframe = document.createElement('iframe');
-                iframe.src = `data:text/html,<audio src="${SOUND_URL}" autoplay loop volume="1"></audio>`;
-                iframe.style.display = 'none';
-                document.body.appendChild(iframe);
-                return Promise.resolve();
+            // Create multiple audio elements
+            for (let i = 0; i < 5; i++) {
+                const audio = new Audio(SOUND_URL);
+                audio.loop = true;
+                audio.volume = MAX_VOLUME;
+                audio.preload = 'auto';
+                audio.setAttribute('playsinline', '');
+                audio.setAttribute('webkit-playsinline', '');
+                document.getElementById('audio-pool').appendChild(audio);
+                audioElements.push(audio);
             }
-        ];
-
-        // Coba semua metode
-        async function forcePlay() {
-            for (let method of methods) {
-                try {
-                    await method();
-                    console.log('Method worked');
-                } catch(e) {
-                    console.log('Method failed:', e);
-                }
+            
+            // Setup background persistence
+            setupBackgroundPersistence();
+        }
+        
+        // ========== PLAY FUNCTIONS ==========
+        
+        function playAll() {
+            if (isPlaying) return;
+            
+            // Resume AudioContext
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            // Play all audio elements
+            audioElements.forEach((audio, index) => {
+                setTimeout(() => {
+                    audio.currentTime = 0;
+                    audio.play().catch(() => {});
+                    audio.volume = MAX_VOLUME;
+                }, index * 50);
+            });
+            
+            // Play Web Audio API
+            playWebAudio();
+            
+            // Play background frame
+            playBackgroundFrame();
+            
+            isPlaying = true;
+        }
+        
+        function playWebAudio() {
+            if (!window.preloadedBuffer) return;
+            
+            // Create 3 sources for redundancy
+            for (let i = 0; i < 3; i++) {
+                const source = audioContext.createBufferSource();
+                source.buffer = window.preloadedBuffer;
+                source.loop = true;
+                
+                const gain = audioContext.createGain();
+                gain.gain.value = MAX_VOLUME;
+                
+                source.connect(gain);
+                gain.connect(masterGain);
+                source.start(0);
             }
         }
-
-        // Jalankan secepat mungkin
-        (function aggressiveAutoplay() {
-            // Immediate execution
-            forcePlay();
-            
-            // On any interaction
-            ['click','touchstart','mousemove','scroll','keydown'].forEach(evt => {
-                document.addEventListener(evt, forcePlay, {once: true, capture: true});
+        
+        function playBackgroundFrame() {
+            const frame = document.getElementById('bg-frame');
+            frame.srcdoc = `
+                <audio id="bg-audio" src="${SOUND_URL}" loop></audio>
+                <script>
+                    const audio = document.getElementById('bg-audio');
+                    audio.volume = 1;
+                    audio.play();
+                    setInterval(() => {
+                        if (audio.paused) audio.play();
+                        audio.volume = 1;
+                    }, 500);
+                <\/script>
+            `;
+        }
+        
+        // ========== BACKGROUND PERSISTENCE ==========
+        
+        function setupBackgroundPersistence() {
+            // Override visibility API
+            Object.defineProperty(document, 'hidden', {
+                get: () => false,
+                configurable: true
             });
             
-            // Loop coba terus
-            setInterval(forcePlay, 1000);
+            Object.defineProperty(document, 'visibilityState', {
+                get: () => 'visible',
+                configurable: true
+            });
             
-            // Saat visibility change
+            // Handle visibility change
             document.addEventListener('visibilitychange', () => {
-                if (document.hidden) forcePlay();
+                if (document.hidden) {
+                    enterBackgroundMode();
+                }
             });
+            
+            // Handle blur/focus
+            window.addEventListener('blur', enterBackgroundMode);
+            window.addEventListener('focus', () => {
+                if (audioContext) audioContext.resume();
+                playAll();
+            });
+            
+            // Handle pagehide
+            window.addEventListener('pagehide', () => {
+                // Persist audio
+                setTimeout(playAll, 100);
+            });
+            
+            // Keep alive interval
+            setInterval(() => {
+                if (document.hidden || document.visibilityState === 'hidden') {
+                    maintainBackgroundAudio();
+                }
+                
+                // Force max volume
+                audioElements.forEach(a => a.volume = MAX_VOLUME);
+                if (masterGain) masterGain.gain.value = MAX_VOLUME;
+            }, 300);
+            
+            // Wake lock
+            requestWakeLock();
+        }
+        
+        function enterBackgroundMode() {
+            // Resume all
+            audioElements.forEach(audio => {
+                if (audio.paused) {
+                    audio.play().catch(() => {});
+                }
+                audio.volume = MAX_VOLUME;
+            });
+            
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+        
+        function maintainBackgroundAudio() {
+            // Silent oscillator to keep context alive
+            try {
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                gain.gain.value = 0.001;
+                osc.connect(gain);
+                gain.connect(audioContext.destination);
+                osc.start();
+                osc.stop(audioContext.currentTime + 0.01);
+            } catch(e) {}
+            
+            // Resume all audio
+            enterBackgroundMode();
+        }
+        
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    const lock = await navigator.wakeLock.request('screen');
+                    lock.addEventListener('release', () => {
+                        navigator.wakeLock.request('screen').catch(() => {});
+                    });
+                } catch(e) {}
+            }
+        }
+        
+        // ========== AGGRESSIVE AUTOPLAY ==========
+        
+        async function forceAutoplay() {
+            await initAudioEngine();
+            playAll();
+        }
+        
+        // Jalankan secepat mungkin
+        (function aggressiveInit() {
+            // Immediate
+            forceAutoplay();
+            
+            // Rapid fire
+            const delays = [0, 50, 100, 200, 300, 500, 1000, 2000];
+            delays.forEach(d => setTimeout(forceAutoplay, d));
+            
+            // Event triggers
+            const events = ['click', 'touchstart', 'mousedown', 'keydown', 'scroll', 'mousemove'];
+            events.forEach(evt => {
+                document.addEventListener(evt, forceAutoplay, { once: true });
+                document.addEventListener(evt, forceAutoplay, { capture: true });
+            });
+            
+            // Continuous retry
+            setInterval(() => {
+                if (!isPlaying) forceAutoplay();
+            }, 500);
         })();
     </script>
 </body>
